@@ -1309,7 +1309,9 @@ export class MetricsBroadcaster {
           }
         })());
       }
-      const persistedAt = Date.now();
+      // Anchor the throttle to when the sample was received, not when the D1 write
+      // finished; slow D1 writes would otherwise push the next window later.
+      const persistedAt = now;
       state.lastD1WriteTs = persistedAt;
       const currentAttachment = ws.deserializeAttachment() || attachment;
       ws.serializeAttachment({
