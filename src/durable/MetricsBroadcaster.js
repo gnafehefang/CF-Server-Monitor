@@ -1266,11 +1266,15 @@ export class MetricsBroadcaster {
       Number(attachment.lastD1WriteTs) || 0
     );
     const nextWriteTs = lastWriteTs + intervalMs;
+    // Agent report timers jitter by a few ms; a strict comparison would skip a
+    // whole interval when a report arrives slightly early, leaving gaps in D1.
+    const jitterMs = Math.min(5000, Math.floor(intervalMs * 0.1));
+    const earliestWriteTs = nextWriteTs - jitterMs;
 
-    if (lastWriteTs > 0 && now < nextWriteTs) {
+    if (lastWriteTs > 0 && now < earliestWriteTs) {
       state.lastD1WriteTs = lastWriteTs;
       this.agentHistoryWrites.set(serverId, state);
-      return { persisted: false, nextD1WriteAfterMs: nextWriteTs - now };
+      return { persisted: false, nextD1WriteAfterMs: earliestWriteTs - now };
     }
 
     state.flushing = true;
