@@ -1357,9 +1357,15 @@ const clearDiskIoChart = () => {
   chart.update('none')
 }
 
+let historyLoadSeq = 0
+let historyBackfillPending = null
+
 const loadAllHistory = async (hours) => {
+  const loadSeq = ++historyLoadSeq
   try {
     const allData = await fetchAllHistory(serverId, hours, apiIndex.value)
+    // 丢弃过期响应，避免切换时间范围/重连补数并发时旧结果覆盖新结果
+    if (loadSeq !== historyLoadSeq) return
     lastReportChartUpdateTime = 0
     lossHistoryFields.value = Object.fromEntries(PING_FIELD_DEFS.map(item => [
       item.lossField,
@@ -1813,6 +1819,7 @@ const goToLogin = () => {
 }
 
 let liveSocket = null
+let liveSocketHadConnected = false
 let liveConnectionClosedByUser = false
 
 const initChartsOnMount = async () => {
@@ -1911,7 +1918,16 @@ const init = async () => {
     onTimeout: () => {
       showLiveTimeoutModal.value = true
     },
-    onStatus: ({ connected }) => {}
+    onStatus: ({ connected }) => {
+      // 实时连接断开（切后台/超时/网络重连）期间没有数据点，重连后重新拉历史补齐断点。
+      // 历史加载会整体替换图表数据，实时点只追加更晚的时间戳，因此不会重复。
+      if (connected && liveSocketHadConnected && !historyBackfillPending) {
+        historyBackfillPending = loadAllHistory(currentHours.value)
+          .catch(() => {})
+          .finally(() => { historyBackfillPending = null })
+      }
+      if (connected) liveSocketHadConnected = true
+    }
   }, apiIndex.value)
 
   document.addEventListener('visibilitychange', handleVisibility)
