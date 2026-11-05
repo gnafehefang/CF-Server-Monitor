@@ -1178,6 +1178,19 @@ export class MetricsBroadcaster {
       : normalizedReportIntervalMs;
   }
 
+  // 无前端访问时 Agent 改为按 report_interval（>=60s）上报。若本次上报因 D1 写入节流未落库，
+  // 直接让 Agent 等满 60s 会跳过一个写入窗口（例如最后一个访客离开、2s -> 60s 切换时），
+  // 历史里就会缺一分钟。此时改为在下一次允许写入后约 500ms 再上报；落库成功后的 ack
+  // 仍返回常规间隔，因此 D1 写入频率仍由节流控制（约每分钟一次），不会形成高频循环。
+  _getAgentAckNextReportAfterMs(nextWssReportAfterMs, persisted, realtimeState) {
+    const state = this._normalizeRealtimeState(realtimeState);
+    const waitMs = Number(persisted?.nextD1WriteAfterMs);
+    if (state.frontendActive || persisted?.persisted || !Number.isFinite(waitMs) || waitMs <= 0) {
+      return nextWssReportAfterMs;
+    }
+    return Math.min(nextWssReportAfterMs, Math.max(1000, Math.ceil(waitMs) + 500));
+  }
+
   async _getAgentHintReportIntervalMs(attachment) {
     const attachedReportIntervalMs = Number(
       attachment?.wssReportIntervalMs ?? attachment?.reportIntervalMs
@@ -1436,9 +1449,13 @@ export class MetricsBroadcaster {
     });
 
     const configAck = await this._buildAgentConfigAck(context);
-    const nextWssReportAfterMs = this._getAgentNextWssReportAfterMs(
-      context.wssReportIntervalMs,
-      context.reportIntervalMs,
+    const nextWssReportAfterMs = this._getAgentAckNextReportAfterMs(
+      this._getAgentNextWssReportAfterMs(
+        context.wssReportIntervalMs,
+        context.reportIntervalMs,
+        realtimeState
+      ),
+      persisted,
       realtimeState
     );
     this._sendWsJson(ws, {

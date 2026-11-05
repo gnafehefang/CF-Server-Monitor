@@ -1371,3 +1371,19 @@ test('WSS history persistence keeps samples received during a D1 flush for the n
     Date.now = originalNow;
   }
 });
+test('idle agent ack shortens next report to the next D1 write window when not persisted', () => {
+  const b = makeBroadcaster();
+  const idle = { frontendActive: false, resourceAlertActive: false, realtimeActive: false };
+  const active = { frontendActive: true, resourceAlertActive: false, realtimeActive: true };
+  // throttled while idle: report right after the window opens instead of a full 60s later
+  assert.equal(b._getAgentAckNextReportAfterMs(60000, { persisted: false, nextD1WriteAfterMs: 7000 }, idle), 7500);
+  // never below 1s
+  assert.equal(b._getAgentAckNextReportAfterMs(60000, { persisted: false, nextD1WriteAfterMs: 1 }, idle), 1000);
+  // never above the normal idle interval
+  assert.equal(b._getAgentAckNextReportAfterMs(60000, { persisted: false, nextD1WriteAfterMs: 120000 }, idle), 60000);
+  // persisted or flushing (0) keep the normal interval
+  assert.equal(b._getAgentAckNextReportAfterMs(60000, { persisted: true, nextD1WriteAfterMs: 60000 }, idle), 60000);
+  assert.equal(b._getAgentAckNextReportAfterMs(60000, { persisted: false, nextD1WriteAfterMs: 0 }, idle), 60000);
+  // viewers active: realtime interval untouched
+  assert.equal(b._getAgentAckNextReportAfterMs(2000, { persisted: false, nextD1WriteAfterMs: 30000 }, active), 2000);
+});
